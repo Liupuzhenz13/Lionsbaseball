@@ -1,0 +1,1299 @@
+    clear all
+clc
+
+%スイング軌道をプロットする
+%ホークアイデータを読み込む
+
+
+%ファイルの入力
+[rdf_name,prd]=uigetfile('*.json','入力ファイルの指定','multiselect','on');
+cd(prd);
+rdf_name=cellstr(rdf_name);
+loopsize=size(rdf_name,2);
+HB_24=[0 0;0.432 0;0.432 0.09;0.216 0.09;0 0];
+HB_62=[0 0;-0.216 0.216;-0.216 0.432;0.216 0.432;0.216 0.216;0 0];
+HB_46=[0 0;0.216 0.045;0.216 0.09;-0.216 0.09;-0.216 0.045;0 0];
+L_box=[-1.566 1.126;-0.366 1.126;-0.366 -0.694;-1.566 -0.694;-1.566 1.126];
+R_box=[1.566 1.126;0.366 1.126;0.366 -0.694;1.566 -0.694;1.566 1.126];
+L_box2=[-1.566 -0.03;-0.366 -0.03;-0.366 0.12;-1.566 0.12];
+R_box2=[1.566 -0.03;0.366 -0.03;0.366 0.12;1.566 0.12];
+bat_graph=[-0.1524 0.033;0.15 0.033;0.1524 0.027;0.1524 -0.027;0.15 -0.033;-0.1524 -0.033];
+zone=[-0.216 0.5;-0.216 0.9;0.216 0.9;0.216 0.5;-0.215 0.5];
+
+formatspec='%.1f';
+% 入力ダイアログのプロンプトメッセージを定義
+% prompt = {'体重は？'};
+% title1 = '変数の入力';
+% answer = inputdlg(prompt, title1);
+BM=85;
+mass_ratio(1:8)=[0.069 0.489 0.027 0.016 0.006 0.11 0.051 0.011];
+m_segment(1:8)=mass_ratio(1:8)*BM;
+radius_ratio(1:9)=[0.467 0.260 0.278 0.545 0.274 0.273 0.207 0.352 0.167]; %頭　上腕　前腕　手　大腿　下腿　足　屈伸　回旋
+I_bat=0.047;
+I=[0.047 0 0;0 0.047 0;0 0 0];
+bat_mass=0.88;
+
+tic
+for i=1:loopsize
+    rdfname=char(rdf_name(i));
+    s=readstruct(rdfname);
+
+    a=fieldnames(s.samples); %sampleデータの中身を確認
+   
+   
+    %詳細情報
+    inning=s.sequences.inning;
+    topbottom_s=s.sequences.half;
+    %batter=s.batter;
+    count=[s.summary.score.count.balls.plateAppearance s.summary.score.count.strikes.plateAppearance s.summary.score.outs.inning];
+    %pitcher=s.pitcher;
+    vel_imp=[];
+    original_date=s.createdAtDateTime;
+    delimiter='T';
+    date=strtok(original_date,delimiter);
+
+    if topbottom_s==1
+       topbottom='top';
+    else
+        topbottom='bottom';
+    end
+
+    %プレイヤーの格納
+    players=s.details.players;
+    [dx5 dy5]=size(players);
+    for p=1:dy5
+        player_name(p)=s.details.players(p).fullName;
+        player_position(p)=s.details.players(p).role.name;
+        player_ID(p)=s.details.players(p).role.id;
+        player_hand(p)=s.details.players(p).handedness.batting;
+    end
+
+    batter_num=find(player_position(1:dy5)=="Batter");
+    pitcher_num=find(player_position(1:dy5)=="Pitcher");
+
+    batter=s.details.players(batter_num).fullName;
+    pitcher=s.details.players(pitcher_num).fullName;
+    batterside=s.details.players(batter_num).handedness.batting;
+
+    %figure用の文字列作成
+    wdw_inning=num2str(inning);
+    wdw_count=num2str(count);
+    wdw_name=[date wdw_inning topbottom batter wdw_count];
+    wdw_name2=join(wdw_name);
+
+    %ボール速度の格納
+    vel_ball(1,1:3)=s.samples.ball(3).vel(1,1:3);
+    ball_vel=(sqrt((vel_ball(1,1)).^2+(vel_ball(1,2)).^2+(vel_ball(1,3)).^2))*3.6;
+
+     %イベントの格納
+    events=s.events;
+    [dx4 dy4]=size(s.events);
+    for e=1:dy4
+        event_type(e)=s.events(e).type;
+    end
+    %イベント番号の格納
+    pitch=find(event_type(1:dy4)=="Pitch");
+    during=find(event_type(1:dy4)=="Hit");
+
+
+    %ボール速度の格納
+    ball_vel=s.events(pitch).start.speed.kph;
+
+    %duringがない場合
+     if isempty(during)
+    before_velocity=[NaN NaN NaN];%インパクト直前の投球速度
+    sweetspot_speed=NaN;%芯のスピード
+    sweetspot_velocity=[NaN NaN NaN];%芯の速度
+    impact_speed=NaN;%インパクトポイントのスピード
+    impact_velocity=[NaN NaN NaN];%インパクトポイントの速度
+    ball_position=[NaN NaN NaN];%インパクト直前のボール座標
+    contact=[NaN NaN NaN];%バットとボールのインパクト座標
+    deviation=[NaN NaN];%芯とインパクト位置の関係
+    exit_speed=NaN;%打球スピード
+    exit_direction=[NaN NaN];%打球方向 
+    squred_up=NaN;
+
+    %beforeがない場合
+    elseif ~isempty(during) && ~isfield(s.events,'before')
+    before_velocity=[NaN NaN NaN];%インパクト直前の投球速度
+    sweetspot_speed=NaN;%芯のスピード
+    sweetspot_velocity=[NaN NaN NaN];%芯の速度
+    impact_speed=NaN;%インパクトポイントのスピード
+    impact_velocity=[NaN NaN NaN];%インパクトポイントの速度
+    ball_position=[NaN NaN NaN];%インパクト直前のボール座標
+    contact=[NaN NaN NaN];%バットとボールのインパクト座標
+    deviation=[NaN NaN];%芯とインパクト位置の関係
+    exit_speed=NaN;%打球スピード
+    exit_direction=[NaN NaN];%打球方向 
+    squred_up=NaN;
+
+    else
+    before_velocity=s.events(during).before.velocity(1,1:3); %インパクト直前の投球速度
+    sweetspot_speed=s.events(during).before.bat.sweetSpot.speed.kph;%芯のスピード
+    sweetspot_velocity=s.events(during).before.bat.sweetSpot.velocity(1,1:3);%芯の速度
+    impact_speed=s.events(during).before.bat.impactPoint.speed.kph;%インパクトポイントのスピード
+    impact_velocity=s.events(during).before.bat.impactPoint.velocity(1,1:3);%インパクトポイントの速度
+    ball_position=s.events(during).during.position(1,1:3);%インパクト直前のボール座標
+    contact=s.events(during).during.bat.contactPoint.position(1,1:3);%バットとボールのインパクト座標
+    deviation=s.events(during).during.bat.sweetSpot.deviation(1,1:2);%芯とインパクト位置の関係
+    exit_speed=s.events(during).start.speed.kph;%打球スピード
+    exit_direction=s.events(during).start.angle(1,1:2);%打球方向
+    squred_up=exit_speed/(1.2*impact_speed+0.2*ball_vel)*100;
+    end
+
+
+    if (a(2,1)=="bat") %batデータがあるデータのみ分析をする
+    batdata=s.samples.bat;
+    %batterside=s.batterSIde;
+    balldata=s.samples.ball;
+
+    %0.01秒後の打球の到達位置を算出
+    EV=[exit_speed*sind(exit_direction(1))/3.6 exit_speed*cosd(exit_direction(1))/3.6 exit_speed*sind(exit_direction(2))/3.6];
+    point05=EV*0.01+contact;
+    EV_potential=1.2*impact_speed+0.2*ball_vel;
+
+    %数を数える
+    [dx dy] =size(batdata);
+    [dx1 dy1]=size(balldata);
+    [dx3 dy3]=size(s.samples.people);
+    rel=0;
+    hit=0;
+
+     %投球座標の格納
+    for b1=1:dy1
+        ball_event(b1)=s.samples.ball(b1).event;
+    end
+
+    rel=find(ball_event(1:dy1)=='Peak',1);
+    hit=find(ball_event(1:dy1)=='Hit');
+    x=rel-1; %forのための係数
+    
+    ball=0;
+    for b=4:13
+        ball(b-3,1:3)=s.samples.ball(b).pos(1,1:3);
+    end
+
+
+    %ボール軌道の近似式
+    pxy=polyfit(ball(:,2),ball(:,1),2);
+    pyz=polyfit(ball(:,2),ball(:,3),2);
+    %xyの軌道
+    xxy=-1.5:0.25:15;
+    yxy=polyval(pxy,xxy);
+    %yzの軌道
+    xyz=-1.5:0.25:15;
+    yyz=polyval(pyz,xyz);
+
+    ratio=1.024:-0.004:0.76;
+    yxy2=yxy.*ratio;
+
+    %打者の骨格データの検索
+    %idとフレームレートを格納
+    for sd=1:dy3
+        skelton_data(sd,1:2)=[s.samples.people(sd).role.id s.samples.people(sd).system.targetFrameRate];
+    end
+    
+    %idとフレームレートで検索
+    bd1(1:dy3,1)=skelton_data(1:dy3,1)+skelton_data(1:dy3,2);
+    bd=find(bd1==310);
+
+    jointdata=s.samples.people(bd).joints;
+    [dx2 dy2]=size(jointdata);
+
+    %バタワースフィルター
+    [fb faa]=butter(4,15/(300/2));
+
+    %身体座標の格納
+    % if (s.samples.people(13).system.targetFrameRate==300)
+    for f=1:dy2
+    time(f,1)=s.samples.people(bd).joints(f).time(1,1);
+    %足座標の格納
+    lbt9(f,1:3)=s.samples.people(bd).joints(f).lBigToe(1,1:3); %左親指
+    lst9(f,1:3)=s.samples.people(bd).joints(f).lSmallToe(1,1:3); %左子指
+    lh9(f,1:3)=s.samples.people(bd).joints(f).lHeel(1,1:3); %左踵
+    lank9(f,1:3)=s.samples.people(bd).joints(f).lAnkle(1,1:3); %左足首
+    rbt9(f,1:3)=s.samples.people(bd).joints(f).rBigToe(1,1:3); %右親指
+    rst9(f,1:3)=s.samples.people(bd).joints(f).rSmallToe(1,1:3); %右小指
+    rh9(f,1:3)=s.samples.people(bd).joints(f).rHeel(1,1:3); %右踵
+    rank9(f,1:3)=s.samples.people(bd).joints(f).rAnkle(1,1:3); %右足首
+    %膝・股関節まわり
+    rkn9(f,1:3)=s.samples.people(bd).joints(f).rKnee(1,1:3); %右膝
+    lkn9(f,1:3)=s.samples.people(bd).joints(f).lKnee(1,1:3); %左膝
+    rhp9(f,1:3)=s.samples.people(bd).joints(f).rHip(1,1:3); %右股関節
+    lhp9(f,1:3)=s.samples.people(bd).joints(f).lHip(1,1:3); %左股関節
+    
+    %肩・頭まわり
+    rshol9(f,1:3)=s.samples.people(bd).joints(f).rShoulder(1,1:3); %右肩
+    lshol9(f,1:3)=s.samples.people(bd).joints(f).lShoulder(1,1:3); %左肩
+    neck9(f,1:3)=s.samples.people(bd).joints(f).neck(1,1:3); %首
+    relb9(f,1:3)=s.samples.people(bd).joints(f).rElbow(1,1:3); %右肘
+    lelb9(f,1:3)=s.samples.people(bd).joints(f).lElbow(1,1:3); %左肘
+    rwst9(f,1:3)=s.samples.people(bd).joints(f).rWrist(1,1:3); %右手首
+    lwst9(f,1:3)=s.samples.people(bd).joints(f).lWrist(1,1:3); %左手首
+    rear9(f,1:3)=s.samples.people(bd).joints(f).rEar(1,1:3); %右耳
+    lear9(f,1:3)=s.samples.people(bd).joints(f).lEar(1,1:3); %左耳
+    rt9(f,1:3)=s.samples.people(bd).joints(f).rThumb(1,1:3); %右親指
+    lt9(f,1:3)=s.samples.people(bd).joints(f).lThumb(1,1:3); %左親指
+    rp9(f,1:3)=s.samples.people(bd).joints(f).rPinky(1,1:3); %右小指
+    lp9(f,1:3)=s.samples.people(bd).joints(f).lPinky(1,1:3); %左小指
+    end
+
+    lbt=filtfilt(fb,faa,lbt9);
+    lst=filtfilt(fb,faa,lst9);
+    lh=filtfilt(fb,faa,lh9);
+    lank=filtfilt(fb,faa,lank9);
+    rbt=filtfilt(fb,faa,rbt9);
+    rst=filtfilt(fb,faa,rst9);
+    rh=filtfilt(fb,faa,rh9);
+    rank=filtfilt(fb,faa,rank9);
+    rkn=filtfilt(fb,faa,rkn9);
+    lkn=filtfilt(fb,faa,lkn9);
+    rhp=filtfilt(fb,faa,rhp9);
+    lhp=filtfilt(fb,faa,lhp9);
+    rshol=filtfilt(fb,faa,rshol9);
+    lshol=filtfilt(fb,faa,lshol9);
+    neck=filtfilt(fb,faa,neck9);
+    relb=filtfilt(fb,faa,relb9);
+    lelb=filtfilt(fb,faa,lelb9);
+    rwst=filtfilt(fb,faa,rwst9);
+    lwst=filtfilt(fb,faa,lwst9);
+    rear=filtfilt(fb,faa,rear9);
+    lear=filtfilt(fb,faa,lear9);
+    rt=filtfilt(fb,faa,rt9);
+    lt=filtfilt(fb,faa,lt9);
+    rp=filtfilt(fb,faa,rp9);
+    lp=filtfilt(fb,faa,lp9);
+ 
+    %batデータの格納
+    for k=1:dy
+    event(k)=batdata(k).event;
+    battime(k,1)=batdata(k).time;
+    bathead9(k,1:3)=batdata(k).head.pos(1,1:3);
+    batgrip9(k,1:3)=batdata(k).handle.pos(1,1:3);
+    end
+    
+    [fb_bat faa_bat]=butter(4,15/(300/2));
+    bathead=filtfilt(fb,faa,bathead9);
+    batgrip=filtfilt(fb_bat,faa_bat,batgrip9);
+    
+    %バット用インパクト位置の検索
+    imp=find(event(2:dy)=='Hit');
+    imp_time=battime(imp+1,1);
+    frame=0;
+    for t=1:dy2
+    if (time(t)<=imp_time)
+       frame=frame+1;
+    end
+    end
+    %for文を回す際のパラメーター バットデータと身体データの一致
+    bat_body_diff=frame-imp;
+    start_diff=imp-200;
+    body_start=start_diff+bat_body_diff;
+       
+    %重心を算出する
+    %各セグメントの重心の位置ベクトル
+    %体幹部
+              % g_head(:,1:3)=(lear(:,1:3)+rear(:,1:3))/2;             
+              % g_trunk(:,1:3)=(1-0.493)*((rshol(:,1:3)+lshol(:,1:3))/2)+(0.493)*((rhp(:,1:3)+lhp(:,1:3))/2);
+              % 
+              % 
+              % %上腕
+              % g_Lhumerus(:,1:3)=(1-0.529)*lshol(:,1:3)+0.529*lelb(:,1:3);
+              % g_Rhumerus(:,1:3)=(1-0.529)*rshol(:,1:3)+0.529*relb(:,1:3);
+              % 
+              % %前腕
+              % g_Lforearm(:,1:3)=(1-0.415)*lelb(:,1:3)+0.415*lwst(:,1:3);
+              % g_Rforearm(:,1:3)=(1-0.415)*relb(:,1:3)+0.415*rwst(:,1:3);
+              % 
+              % 
+              % %手部
+              % g_Lhand(:,1:3)=(lt(:,1:3)+lp(:,1:3))/2;
+              % g_Rhand(:,1:3)=(rt(:,1:3)+rp(:,1:3))/2;             
+              % 
+              % %大腿
+              % g_Lthigh(:,1:3)=(1-0.475)*lhp(:,1:3)+0.475*lkn(:,1:3);
+              % g_Rthigh(:,1:3)=(1-0.475)*rhp(:,1:3)+0.475*rkn(:,1:3);             
+              % 
+              % %下腿
+              % g_Lshank(:,1:3)=(1-0.406)*lkn(:,1:3)+0.406*lank(:,1:3);
+              % g_Rshank(:,1:3)=(1-0.406)*rkn(:,1:3)+0.406*rank(:,1:3);              
+              % 
+              % %足部
+              % g_Lfoot(:,1:3)=(0.595)*lh(:,1:3)+(1-0.595)*((lbt(:,1:3)+lst(:,1:3))/2);
+              % g_Rfoot(:,1:3)=(0.595)*rh(:,1:3)+(1-0.595)*((rbt(:,1:3)+rst(:,1:3))/2);
+              % 
+              % %バット
+              clear g_bat;
+              g_bat(:,1:3)=(0.67)*bathead(:,1:3)+(1-0.67)*batgrip(:,1:3);
+
+    %セグメントの算出と平均値の算出
+    %頭
+    head=2*((rear+lear)/2-neck);
+    l_head=sqrt(head(:,1).^2+head(:,2).^2+head(:,3).^2);
+    m_head=mean(l_head);
+    %右足
+    r_foot=(rbt+rst)/2-rh;
+    lr_foot=sqrt(r_foot(:,1).^2+r_foot(:,2).^2+r_foot(:,3).^2);
+    m_rfoot=mean(lr_foot);
+    %右下腿
+    r_shank=rkn-rank;
+    lr_shank=sqrt(r_shank(:,1).^2+r_shank(:,2).^2+r_shank(:,3).^2);
+    m_rshank=mean(lr_shank);
+    %右大腿
+    r_thigh=rhp-rkn;
+    lr_thigh=sqrt(r_thigh(:,1).^2+r_thigh(:,2).^2+r_thigh(:,3).^2);
+    m_rthigh=mean(lr_thigh);
+    %左足
+    l_foot=(lbt+lst)/2-lh;
+    ll_foot=sqrt(l_foot(:,1).^2+l_foot(:,2).^2+l_foot(:,3).^2);
+    m_lfoot=mean(ll_foot);
+    %左下腿
+    l_shank=lkn-lank;
+    ll_shank=sqrt(l_shank(:,1).^2+l_shank(:,2).^2+l_shank(:,3).^2);
+    m_lshank=mean(ll_shank);
+    %左大腿
+    l_thigh=lhp-lkn;
+    ll_thigh=sqrt(l_thigh(:,1).^2+l_thigh(:,2).^2+l_thigh(:,3).^2);
+    m_lthigh=mean(ll_thigh);
+
+    %骨盤
+    pelvis=lhp-rhp;
+    l_pelvis=sqrt(pelvis(:,1).^2+pelvis(:,2).^2+pelvis(:,3).^2);
+    %肩
+    shoulder=lshol-rshol;
+    l_shoulder=sqrt(shoulder(:,1).^2+shoulder(:,2).^2+shoulder(:,3).^2);
+
+
+    %右上腕
+    r_hummerus=relb-rshol;
+    lr_hummerus=sqrt(r_hummerus(:,1).^2+r_hummerus(:,2).^2+r_hummerus(:,3).^2);
+    m_rhummerus=mean(lr_hummerus);
+    %右前腕
+    r_forearm=rwst-relb;
+    lr_forearm=sqrt(r_forearm(:,1).^2+r_forearm(:,2).^2+r_forearm(:,3).^2);
+    m_rforearm=mean(lr_forearm);
+    %右手
+    r_hand=(rt+rp)/2-rwst;
+    lr_hand=sqrt(r_hand(:,1).^2+r_hand(:,2).^2+r_hand(:,3).^2);
+    m_rhand=mean(lr_hand);
+    %左上腕
+    l_hummerus=lelb-lshol;
+    ll_hummerus=sqrt(l_hummerus(:,1).^2+l_hummerus(:,2).^2+l_hummerus(:,3).^2);
+    m_lhummerus=mean(ll_hummerus);
+    %左前腕
+    l_forearm=lwst-lelb;
+    ll_forearm=sqrt(l_forearm(:,1).^2+l_forearm(:,2).^2+l_forearm(:,3).^2);
+    m_lforearm=mean(ll_forearm);
+    %左手
+    l_hand=(lt+lp)/2-lwst;
+    ll_hand=sqrt(l_hand(:,1).^2+l_hand(:,2).^2+l_hand(:,3).^2);
+    m_lhand=mean(ll_hand);
+
+    %体幹
+    trunk=(rhp+lhp)/2-(rshol+lshol)/2;
+    l_trunk=sqrt(trunk(:,1).^2+trunk(:,2).^2+trunk(:,3).^2);
+    m_trunk=mean(l_trunk);
+    %体幹中点 回旋用のラインベクトル
+    mid_right=(rshol+rhp)/2;
+    mid_left=(lshol+lhp)/2;
+    ty_trunk=mid_left-mid_right;
+    l_trunkty=sqrt(ty_trunk(:,1).^2+ty_trunk(:,2).^2+ty_trunk(:,3).^2);
+
+    %バットベクトルの算出 z軸にする
+    vec_bat=bathead-batgrip;
+    l_bat=sqrt(vec_bat(:,1).^2+vec_bat(:,2).^2+vec_bat(:,3).^2);
+    m_bat=mean(l_bat);
+
+    %身体セグメントの慣性モーメント
+    % I_head=0.0248;
+    % I_rhummerus=m_segment(3)*((m_rhummerus*radius_ratio(2))^2);
+    % I_lhummerus=m_segment(3)*((m_lhummerus*radius_ratio(2))^2);
+    % I_rforearm=m_segment(4)*((m_rforearm*radius_ratio(3))^2);
+    % I_lforearm=m_segment(4)*((m_lforearm*radius_ratio(3))^2);
+    % I_rhand=m_segment(5)*((m_rhand*radius_ratio(4))^2);
+    % I_lhand=m_segment(5)*((m_lhand*radius_ratio(4))^2);
+    % I_rthigh=m_segment(6)*((m_rthigh*radius_ratio(5))^2);
+    % I_lthigh=m_segment(6)*((m_lthigh*radius_ratio(5))^2);
+    % I_rshank=m_segment(7)*((m_rshank*radius_ratio(6))^2);
+    % I_lshank=m_segment(7)*((m_lthigh*radius_ratio(6))^2);
+    % I_rfoot=m_segment(8)*((m_rfoot*radius_ratio(7))^2);
+    % I_lfoot=m_segment(8)*((m_lfoot*radius_ratio(7))^2);
+    % I_trunky=m_segment(2)*((m_trunk*radius_ratio(8))^2);
+    % I_trunkz=m_segment(2)*((m_trunk*radius_ratio(9))^2);
+    
+    
+    %セグメントベクトルから静止座標系における角速度ベクトルを算出する
+        r_foot_avs(1,1:3)=0;  r_foot_avs(dy2,1:3)=0;
+        l_foot_avs(1,1:3)=0;  l_foot_avs(dy2,1:3)=0;
+        r_shank_avs(1,1:3)=0;  r_shank_avs(dy2,1:3)=0;
+        l_shank_avs(1,1:3)=0;  l_shank_avs(dy2,1:3)=0;
+        r_thigh_avs(1,1:3)=0;  r_thigh_avs(dy2,1:3)=0;
+        l_thigh_avs(1,1:3)=0;  l_thigh_avs(dy2,1:3)=0;
+        r_hummerus_avs(1,1:3)=0;  r_hummerus_avs(dy2,1:3)=0;
+        l_hummerus_avs(1,1:3)=0;  l_hummerus_avs(dy2,1:3)=0;
+        r_forearm_avs(1,1:3)=0;  r_forearm_avs(dy2,1:3)=0;
+        l_forearm_avs(1,1:3)=0;  l_forearm_avs(dy2,1:3)=0;
+        r_hand_avs(1,1:3)=0;  r_hand_avs(dy2,1:3)=0;
+        l_hand_avs(1,1:3)=0;  l_hand_avs(dy2,1:3)=0;
+        head_avs(1,1:3)=0;  head_avs(dy2,1:3)=0;
+        trunk_twist_avs(1,1:3)=0;  trunk_twist_avs(dy2,1:3)=0;
+        trunk_l_avs(1,1:3)=0;  trunk_l_avs(dy2,1:3)=0;
+    for av=2:dy2-1
+        r_foot_avs(av,1:3)=cross(r_foot(av,1:3),(r_foot(av+1,1:3)-r_foot(av-1,1:3)))/lr_foot(av,1)/lr_foot(av,1)*150;
+        l_foot_avs(av,1:3)=cross(l_foot(av,1:3),(l_foot(av+1,1:3)-l_foot(av-1,1:3)))/ll_foot(av,1)/ll_foot(av,1)*150;
+        r_shank_avs(av,1:3)=cross(r_shank(av,1:3),(r_shank(av+1,1:3)-r_shank(av-1,1:3)))/lr_shank(av,1)/lr_shank(av,1)*150;
+        l_shank_avs(av,1:3)=cross(l_shank(av,1:3),(l_shank(av+1,1:3)-l_shank(av-1,1:3)))/ll_shank(av,1)/ll_shank(av,1)*150;
+        r_thigh_avs(av,1:3)=cross(r_thigh(av,1:3),(r_thigh(av+1,1:3)-r_thigh(av-1,1:3)))/lr_thigh(av,1)/lr_thigh(av,1)*150;
+        l_thigh_avs(av,1:3)=cross(l_thigh(av,1:3),(l_thigh(av+1,1:3)-l_thigh(av-1,1:3)))/ll_thigh(av,1)/ll_thigh(av,1)*150;
+        r_hummerus_avs(av,1:3)=cross(r_hummerus(av,1:3),(r_hummerus(av+1,1:3)-r_hummerus(av-1,1:3)))/lr_hummerus(av,1)/lr_hummerus(av,1)*150;
+        l_hummerus_avs(av,1:3)=cross(l_hummerus(av,1:3),(l_hummerus(av+1,1:3)-l_hummerus(av-1,1:3)))/ll_hummerus(av,1)/ll_hummerus(av,1)*150;
+        r_forearm_avs(av,1:3)=cross(r_forearm(av,1:3),(r_forearm(av+1,1:3)-r_forearm(av-1,1:3)))/lr_forearm(av,1)/lr_forearm(av,1)*150;
+        l_forearm_avs(av,1:3)=cross(l_forearm(av,1:3),(l_forearm(av+1,1:3)-l_forearm(av-1,1:3)))/ll_forearm(av,1)/ll_forearm(av,1)*150;
+        r_hand_avs(av,1:3)=cross(r_hand(av,1:3),(r_hand(av+1,1:3)-r_hand(av-1,1:3)))/lr_hand(av,1)/lr_hand(av,1)*150;
+        l_hand_avs(av,1:3)=cross(l_hand(av,1:3),(l_hand(av+1,1:3)-l_hand(av-1,1:3)))/ll_hand(av,1)/ll_hand(av,1)*150;
+        head_avs(av,1:3)=cross(head(av,1:3),(head(av+1,1:3)-head(av-1,1:3)))/l_head(av,1)/l_head(av,1)*150;
+        trunk_twist_avs(av,1:3)=cross(ty_trunk(av,1:3),(ty_trunk(av+1,1:3)-ty_trunk(av-1,1:3)))/l_trunkty(av,1)/l_trunkty(av,1)*150;
+        trunk_l_avs(av,1:3)=cross(trunk(av,1:3),(trunk(av+1,1:3)-trunk(av-1,1:3)))/l_trunk(av,1)/l_trunk(av,1)*150;
+    end
+
+    %Local termの角運動量
+    % Hl_head=I_head*head_avs;
+    % Hl_rhummerus=I_rhummerus*r_hummerus_avs;
+    % Hl_lhummerus=I_lhummerus*l_hummerus_avs;
+    % Hl_rforearm=I_rforearm*r_forearm_avs;
+    % Hl_lforearm=I_lforearm*l_forearm_avs;
+    % Hl_rhand=I_rhand*r_hand_avs;
+    % Hl_lhand=I_lhand*l_hand_avs;
+    % Hl_rthigh=I_rthigh*r_thigh_avs;
+    % Hl_lthigh=I_lthigh*l_thigh_avs;
+    % Hl_rshank=I_rshank*r_shank_avs;
+    % Hl_lshank=I_lshank*l_shank_avs;
+    % Hl_rfoot=I_rfoot*r_foot_avs;
+    % Hl_lfoot=I_lfoot*l_foot_avs;
+    % Hl_trunk_l=I_trunky*trunk_l_avs;
+    % Hl_trunk_twist=I_trunkz*trunk_twist_avs;
+    
+
+    %システム重心の算出
+    % for g1=1:200
+    %     GM(g1,1:3)=(m_segment(1)*g_head(g1+body_start,1:3)+m_segment(2)*g_trunk(g1+body_start,1:3)+m_segment(3)*g_Rhumerus(g1+body_start,1:3)+...
+    %                 m_segment(3)*g_Lhumerus(g1+body_start,1:3)+m_segment(4)*g_Lforearm(g1+body_start,1:3)+m_segment(4)*g_Rforearm(g1+body_start,1:3)+...
+    %                 m_segment(5)*g_Rhand(g1+body_start,1:3)+m_segment(5)*g_Lhand(g1+body_start,1:3)+m_segment(6)*g_Rthigh(g1+body_start,1:3)+...
+    %                 m_segment(6)*g_Lthigh(g1+body_start,1:3)+m_segment(7)*g_Lshank(g1+body_start,1:3)+m_segment(7)*g_Rshank(g1+body_start,1:3)+...
+    %                 m_segment(8)*g_Rfoot(g1+body_start,1:3)+m_segment(8)*g_Lfoot(g1+body_start,1:3)+bat_mass*g_bat(g1+start_diff,1:3))/(BM+bat_mass);
+    % end
+    %transfar term
+    %位置ベクトルを出す
+    % r_head=g_head(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_rhummerus=g_Rhumerus(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_lhummerus=g_Lhumerus(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_rforearm=g_Rforearm(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_lforearm=g_Lforearm(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_rhand=g_Rhand(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_lhand=g_Lhand(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_rthigh=g_Rthigh(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_lthigh=g_Lthigh(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_rshank=g_Rshank(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_lshank=g_Lshank(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_rfoot=g_Rfoot(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_lfoot=g_Lfoot(body_start+1:frame,1:3)-GM(1:200,1:3);
+    % r_trunk=g_trunk(body_start+1:frame,1:3)-GM(1:200,1:3);
+
+    % r_bat=g_bat(start_diff+1:imp,1:3)-GM(1:200,1:3);
+    % Ix_bat=I_bat+bat_mass*(r_bat(:,2).^2+r_bat(:,3).^2);
+    % Iy_bat=I_bat+bat_mass*(r_bat(:,1).^2+r_bat(:,3).^2);
+    % Iz_bat=bat_mass*(r_bat(:,2).^2+r_bat(:,1).^2);
+
+    %速度ベクトルを出して角運動量を出す。
+    % for g2=2:199
+    %     Ht_head(g2,1:3)=cross(r_head(g2,1:3),(r_head(g2+1,1:3)-r_head(g2-1,1:3)))*m_segment(1)*150;
+    %     Ht_rhummerus(g2,1:3)=cross(r_rhummerus(g2,1:3),(r_rhummerus(g2+1,1:3)-r_rhummerus(g2-1,1:3)))*m_segment(3)*150;
+    %     Ht_lhummerus(g2,1:3)=cross(r_lhummerus(g2,1:3),(r_lhummerus(g2+1,1:3)-r_lhummerus(g2-1,1:3)))*m_segment(3)*150;
+    %     Ht_rforearm(g2,1:3)=cross(r_rforearm(g2,1:3),(r_rforearm(g2+1,1:3)-r_rforearm(g2-1,1:3)))*m_segment(4)*150;
+    %     Ht_lforearm(g2,1:3)=cross(r_lforearm(g2,1:3),(r_lforearm(g2+1,1:3)-r_lforearm(g2-1,1:3)))*m_segment(4)*150;
+    %     Ht_rhand(g2,1:3)=cross(r_rhand(g2,1:3),(r_rhand(g2+1,1:3)-r_rhand(g2-1,1:3)))*m_segment(5)*150;
+    %     Ht_lhand(g2,1:3)=cross(r_lhand(g2,1:3),(r_lhand(g2+1,1:3)-r_lhand(g2-1,1:3)))*m_segment(5)*150;
+    %     Ht_rthigh(g2,1:3)=cross(r_rthigh(g2,1:3),(r_rthigh(g2+1,1:3)-r_rthigh(g2-1,1:3)))*m_segment(6)*150;
+    %     Ht_lthigh(g2,1:3)=cross(r_lthigh(g2,1:3),(r_lthigh(g2+1,1:3)-r_lthigh(g2-1,1:3)))*m_segment(6)*150;
+    %     Ht_rshank(g2,1:3)=cross(r_rshank(g2,1:3),(r_rshank(g2+1,1:3)-r_rshank(g2-1,1:3)))*m_segment(7)*150;
+    %     Ht_lshank(g2,1:3)=cross(r_lshank(g2,1:3),(r_lshank(g2+1,1:3)-r_lshank(g2-1,1:3)))*m_segment(7)*150;
+    %     Ht_rfoot(g2,1:3)=cross(r_rfoot(g2,1:3),(r_rfoot(g2+1,1:3)-r_rfoot(g2-1,1:3)))*m_segment(8)*150;
+    %     Ht_lfoot(g2,1:3)=cross(r_lfoot(g2,1:3),(r_lfoot(g2+1,1:3)-r_lfoot(g2-1,1:3)))*m_segment(8)*150;
+    %     Ht_trunk(g2,1:3)=cross(r_trunk(g2,1:3),(r_trunk(g2+1,1:3)-r_trunk(g2-1,1:3)))*m_segment(2)*150;
+    %     Ht_bat(g2,1:3)=cross(r_bat(g2,1:3),(r_bat(g2+1,1:3)-r_bat(g2-1,1:3)))*bat_mass*150;
+    % end
+    
+    headvel(1,1:3)=[0 0 0];
+    vel_grip(1,1)=0;
+    vel_grip(1,1)=0;
+    bat_av(dy,1)=0;
+    bat_av(dy,1)=0;
+    %headvel(dy-1,1:3)=[0 0 0];
+    headvel(dy,1:3)=[0 0 0];
+    AV_bat(1,1)=0;
+    for j=2:dy-2
+        headvel(j,1:3)=(bathead(j+1,1:3)-bathead(j-1,1:3))*150;
+        gripvel(j,1:3)=(batgrip(j+1,1:3)-batgrip(j-1,1:3))*150;
+        vel_head(j,1)=sqrt((headvel(j,1))^2+(headvel(j,2))^2+(headvel(j,3))^2);
+        vel_grip(j,1)=sqrt((gripvel(j,1))^2+(gripvel(j,2))^2+(gripvel(j,3))^2);
+        bat_av(j,1:3)=cross(vec_bat(j,1:3),(vec_bat(j+1,1:3)-vec_bat(j-1,1:3)))/l_bat(j,1)/l_bat(j,1)*150;
+        bat_anglev(j,1)=(acos((dot(vec_bat(j+1,1:3),vec_bat(j-1,1:3)))/l_bat(j,1)/l_bat(j,1)))*150;
+    end
+    AV_bat(2:dy,1)=(sqrt((bat_av(2:dy,1)).^2+(bat_av(2:dy,2)).^2+(bat_av(2:dy,3)).^2)).*m_bat;
+    
+    %バット座標系の作成
+    headvel_l=sqrt((headvel(:,1)).^2+(headvel(:,2)).^2+(headvel(:,3)).^2);
+    bat_tx=headvel./headvel_l;
+    bat_z=vec_bat./l_bat;
+    bat_y=cross(bat_z,bat_tx);
+    bat_x=cross(bat_y,bat_z);
+
+    for rm=1:dy
+    A_bat(1:3,1:3,rm)=[bat_x(rm,1) bat_y(rm,1) bat_z(rm,1);bat_x(rm,2) bat_y(rm,2) bat_z(rm,2);bat_x(rm,3) bat_y(rm,3) bat_z(rm,3)];
+    IG(1:3,1:3,rm)=A_bat(1:3,1:3,rm)*I*transpose(A_bat(1:3,1:3,rm));
+    end
+
+   %静止座標系から見たバットの慣性モーメント
+   %IG=A_bat.*I.*transpose(A_bat);
+
+    % Hl_bat=I_bat*bat_av;
+
+    %全身の角運動量
+    % H_body=Hl_bat(start_diff+1:imp-1,1:3)+Hl_trunk_twist(body_start+1:frame-1,1:3)+Hl_trunk_l(body_start+1:frame-1,1:3)+...
+    %        Hl_head(body_start+1:frame-1,1:3)+Hl_rhummerus(body_start+1:frame-1,1:3)+Hl_lhummerus(body_start+1:frame-1,1:3)+...
+    %        Hl_rforearm(body_start+1:frame-1,1:3)+Hl_lforearm(body_start+1:frame-1,1:3)+Hl_rhand(body_start+1:frame-1,1:3)+...
+    %        Hl_lhand(body_start+1:frame-1,1:3)+Hl_rthigh(body_start+1:frame-1,1:3)+Hl_lthigh(body_start+1:frame-1,1:3)+...
+    %        Hl_rshank(body_start+1:frame-1,1:3)+Hl_lshank(body_start+1:frame-1,1:3)+Hl_rfoot(body_start+1:frame-1,1:3)+...
+    %        Hl_lfoot(body_start+1:frame-1,1:3)+Ht_head(1:199,1:3)+Ht_trunk(1:199,1:3)+Ht_rhummerus(1:199,1:3)+Ht_lhummerus(1:199,1:3)+...
+    %        Ht_rforearm(1:199,1:3)+Ht_lforearm(1:199,1:3)+Ht_rhand(1:199,1:3)+Ht_lhand(1:199,1:3)+Ht_rthigh(1:199,1:3)+Ht_lthigh(1:199,1:3)+...
+    %        Ht_rshank(1:199,1:3)+Ht_lshank(1:199,1:3)+Ht_rfoot(1:199,1:3)+Ht_lfoot(1:199,1:3)+Ht_bat(1:199,1:3);
+
+    vel_bat=vel_head+vel_grip;
+
+    %体幹部について
+    %座標系作る
+    mid_right=(rshol+rhp)/2;
+    mid_left=(lshol+lhp)/2;
+    z_trunk=neck-(mid_right+mid_left)/2;
+    ty_trunk=mid_left-mid_right;
+    x_trunk=cross(ty_trunk,z_trunk);
+    y_trunk=cross(z_trunk,x_trunk);
+
+    ux_trunk=x_trunk./sqrt((x_trunk(:,1)).^2+(x_trunk(:,2)).^2+(x_trunk(:,3)).^2);
+    uy_trunk=y_trunk./sqrt((y_trunk(:,1)).^2+(y_trunk(:,2)).^2+(y_trunk(:,3)).^2);
+    uz_trunk=z_trunk./sqrt((z_trunk(:,1)).^2+(z_trunk(:,2)).^2+(z_trunk(:,3)).^2);
+
+    mid_trunk=(mid_right+mid_left)/2;
+    trunk_bat=g_bat(start_diff+1:imp,1:3)-mid_trunk(body_start+1:frame,1:3);
+    IG_batx=squeeze(IG(1,1,start_diff+1:imp));
+    IG_baty=squeeze(IG(2,2,start_diff+1:imp));
+    IG_batz=squeeze(IG(3,3,start_diff+1:imp));
+    Ixt_bat=bat_mass*(trunk_bat(:,2).^2+trunk_bat(:,3).^2)+IG_batx;
+    Iyt_bat=bat_mass*(trunk_bat(:,1).^2+trunk_bat(:,3).^2)+IG_baty;
+    Izt_bat=bat_mass*(trunk_bat(:,2).^2+trunk_bat(:,1).^2)+IG_batz;
+   
+    %インパクト時のバットヘッドスピード
+    if (imp==1)
+        vel_imp=NaN;
+
+    elseif (vel_head(imp-1)>47.0)
+        vel_imp=(vel_head(imp-2))*3.6;
+        swing_angle=(atan(headvel(imp-2,3)/sqrt((headvel(imp-2,2)).^2+(headvel(imp-2,1)).^2)))*180/pi;
+        s1=num2str(vel_imp,formatspec);
+        s2=num2str(swing_angle,formatspec);
+        s3=num2str(ball_vel,formatspec);
+
+    else
+        vel_imp=(vel_head(imp-1))*3.6;
+        swing_angle=(atan(headvel(imp-1,3)/sqrt((headvel(imp-1,2)).^2+(headvel(imp-1,1)).^2)))*180/pi;
+        s1=num2str(vel_imp,formatspec);
+        s2=num2str(swing_angle,formatspec);
+        s3=num2str(ball_vel,formatspec);
+    end
+
+    %フェーズの決定
+    %踏み出し脚の接地
+    for f=2:dy2-1
+        lheel_v(f,1:3)=lh9(f+1,1:3)-lh9(f-1,1:3);
+        rheel_v(f,1:3)=rh9(f+1,1:3)-rh9(f-1,1:3);
+    end
+    if batterside=='Left'
+       [min_val foot_on]=min(rheel_v(body_start:frame,3));
+       % H_body_g=H_body(:,3)*-1;
+    else
+       [min_val foot_on]=min(lheel_v(body_start:frame,3));
+       % H_body_g=H_body(:,3);
+    end
+
+    %体幹の最大捻転
+    %ベクトルは右から左に向いている
+    if batterside=='Left'
+    pelvis_angle=acosd(-1*pelvis(:,1)./l_pelvis);
+    shoulder_angle=acosd(-1*shoulder(:,1)./l_shoulder);
+    twist_angle=shoulder_angle-pelvis_angle;
+    [max_val max_twist]=max(twist_angle(body_start:frame));
+    else
+    pelvis_angle=acosd(pelvis(:,1)./l_pelvis);
+    shoulder_angle=acosd(shoulder(:,1)./l_shoulder);
+    twist_angle=pelvis_angle-shoulder_angle;
+    [max_val max_twist]=max(twist_angle(body_start:frame));
+    end
+
+    %バットが地面と平行
+    pararell=find(vec_bat(start_diff:imp,3)<0,1);
+    %19行のifの続き
+
+    %テキストの作成
+    texts1=['グリップ速度(m/s)：',num2str(vel_grip(imp-1),'%.1f')];
+    texts2=['バット回転速度(m/s)：',num2str(AV_bat(imp-1),'%.1f')];
+    texts3=['打球速度(km/h)：',num2str(exit_speed,'%.1f')];
+    texts4=['打球方向(°)：',num2str(exit_direction(1),'%.1f')];
+    texts5=['打球角度(°)：',num2str(exit_direction(2),'%.1f')];
+    texts6=['バット速度(km/h)：',num2str(impact_speed,'%.1f')];
+    texts7=['効率(%)：',num2str(squred_up,'%.1f')];
+    texts8=['理想の打球速度(km/h)：',num2str(EV_potential,'%.1f')];
+
+    texts11=['最大捻転：縦回転　',num2str(Ixt_bat(max_twist),'%.2f')];
+    texts12=['最大捻転：横回転　',num2str(Izt_bat(max_twist),'%.2f')];
+    texts13=['バット平行：縦回転　',num2str(Ixt_bat(pararell),'%.2f')];
+    texts14=['バット平行：横回転　',num2str(Izt_bat(pararell),'%.2f')];
+
+
+
+    else
+        
+    end %ifのend 
+
+    
+    %g(:,3*i-2:3*i)=GM(:,1:3);
+    %インパクト時のスイングスピードが空白かどうかを判断する
+    TF=isempty(vel_imp);
+    hitting_info(i,1:2)={batter,vel_imp};
+    if (TF~=1)%||(vel_imp==0)
+    ti=imp-50;
+    fig=figure('Name',wdw_name2);
+    subplot(3,4,[5 6]);
+    plot(vel_grip(start_diff:imp-1,1),'b');
+    hold on
+    plot(AV_bat(start_diff:imp-1,1),'m');
+    hold on
+    xline(foot_on,'k:');
+    hold on
+    xline(max_twist,'k:');
+    hold on
+    xline(pararell,'k:');
+    hold on 
+    text(10,45,texts1,'Color','b','FontSize',6);
+    hold on
+    text(10,35,texts2,'Color','m','FontSize',6);
+    hold on
+    grid on
+    yline(0,'k');
+    title('グリップの速度とバットの回転速度');
+    ylim([-10 50]);
+
+    subplot(3,4,[9 10]);
+    plot(Ixt_bat,'b');
+    hold on
+    plot(Izt_bat,'m');
+    hold on
+    xline(foot_on,'k:');
+    hold on
+    xline(max_twist,'k:');
+    hold on
+    text(10,1.1,texts11,'Color','b','FontSize',6);
+    hold on
+    text(10,0.9,texts12,'Color','m','FontSize',6);
+    hold on
+    text(100,1.1,texts13,'Color','b','FontSize',6);
+    hold on
+    text(100,0.9,texts14,'Color','m','FontSize',6);
+    hold on
+    xline(pararell,'k:')
+    title('バットの慣性モーメント');
+    grid on
+    ylim([0 1.2]);
+    
+    subplot(3,4,1)
+    
+    %左小指
+    plot([lst(body_start+foot_on,2), lank(body_start+foot_on,2)], [lst(body_start+foot_on,3), lank(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左親指
+    plot([lbt(body_start+foot_on,2), lank(body_start+foot_on,2)], [lbt(body_start+foot_on,3), lank(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左踵
+    plot([lh(body_start+foot_on,2), lank(body_start+foot_on,2)], [lh(body_start+foot_on,3), lank(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左下腿
+    plot([lank(body_start+foot_on,2), lkn(body_start+foot_on,2)], [lank(body_start+foot_on,3), lkn(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左大腿
+    plot([lkn(body_start+foot_on,2), lhp(body_start+foot_on,2)], [lkn(body_start+foot_on,3), lhp(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右小指
+    plot([rst(body_start+foot_on,2), rank(body_start+foot_on,2)], [rst(body_start+foot_on,3), rank(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右親指
+    plot([rbt(body_start+foot_on,2), rank(body_start+foot_on,2)], [rbt(body_start+foot_on,3), rank(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右踵
+    plot([rh(body_start+foot_on,2), rank(body_start+foot_on,2)], [rh(body_start+foot_on,3), rank(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右下腿
+    plot([rank(body_start+foot_on,2), rkn(body_start+foot_on,2)], [rank(body_start+foot_on,3), rkn(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右大腿
+    plot([rkn(body_start+foot_on,2), rhp(body_start+foot_on,2)], [rkn(body_start+foot_on,3), rhp(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %両大腿
+    plot([lhp(body_start+foot_on,2), rhp(body_start+foot_on,2)], [lhp(body_start+foot_on,3), rhp(body_start+foot_on,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左体幹
+    plot([lshol(body_start+foot_on,2), lhp(body_start+foot_on,2)], [lshol(body_start+foot_on,3), lhp(body_start+foot_on,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %両肩
+    plot([lshol(body_start+foot_on,2), rshol(body_start+foot_on,2)], [lshol(body_start+foot_on,3), rshol(body_start+foot_on,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右体幹
+    plot([rshol(body_start+foot_on,2), rhp(body_start+foot_on,2)], [rshol(body_start+foot_on,3), rhp(body_start+foot_on,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+
+    if batterside=='Left'
+    %左上腕
+    plot([lshol(body_start+foot_on,2), lelb(body_start+foot_on,2)], [lshol(body_start+foot_on,3), lelb(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左前腕
+    plot([lelb(body_start+foot_on,2), lwst(body_start+foot_on,2)], [lelb(body_start+foot_on,3), lwst(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右上腕
+    plot([rshol(body_start+foot_on,2), relb(body_start+foot_on,2)], [rshol(body_start+foot_on,3), relb(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右前腕
+    plot([relb(body_start+foot_on,2), rwst(body_start+foot_on,2)], [relb(body_start+foot_on,3), rwst(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    else
+     %右上腕
+    plot([rshol(body_start+foot_on,2), relb(body_start+foot_on,2)], [rshol(body_start+foot_on,3), relb(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右前腕
+    plot([relb(body_start+foot_on,2), rwst(body_start+foot_on,2)], [relb(body_start+foot_on,3), rwst(body_start+foot_on,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左上腕
+    plot([lshol(body_start+foot_on,2), lelb(body_start+foot_on,2)], [lshol(body_start+foot_on,3), lelb(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左前腕
+    plot([lelb(body_start+foot_on,2), lwst(body_start+foot_on,2)], [lelb(body_start+foot_on,3), lwst(body_start+foot_on,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    end
+    %左耳
+    plot([neck(body_start+foot_on,2), lear(body_start+foot_on,2)], [neck(body_start+foot_on,3), lear(body_start+foot_on,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右耳
+    plot([neck(body_start+foot_on,2), rear(body_start+foot_on,2)], [neck(body_start+foot_on,3), rear(body_start+foot_on,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    % %重心
+    % plot(GM(foot_on,2), GM(foot_on,3), 'o',...
+    %       'MarkerSize', 5,'MarkerFaceColor',[0.5,0.5,0.5] ,'MarkerEdgeColor','b');
+    % hold on
+    %バット
+    plot([bathead(start_diff+foot_on,2), batgrip(start_diff+foot_on,2)], [bathead(start_diff+foot_on,3), batgrip(start_diff+foot_on,3)], ...
+          "color",[0 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %ヘッド軌道
+    plot(bathead(start_diff+foot_on:imp,2),bathead(start_diff+foot_on:imp,3),'m');
+    hold on
+    plot(xyz,yyz,'--c');
+    hold on
+    xlim([-1 1]);
+    ylim([0 2]);
+    title({'Pitcher' pitcher});
+    if batterside=='Left'
+        set(gca, 'XDir', 'reverse');
+    end
+
+    subplot(3,4,2)
+    
+    %左小指
+    plot([lst(body_start+max_twist,2), lank(body_start+max_twist,2)], [lst(body_start+max_twist,3), lank(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左親指
+    plot([lbt(body_start+max_twist,2), lank(body_start+max_twist,2)], [lbt(body_start+max_twist,3), lank(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左踵
+    plot([lh(body_start+max_twist,2), lank(body_start+max_twist,2)], [lh(body_start+max_twist,3), lank(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左下腿
+    plot([lank(body_start+max_twist,2), lkn(body_start+max_twist,2)], [lank(body_start+max_twist,3), lkn(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左大腿
+    plot([lkn(body_start+max_twist,2), lhp(body_start+max_twist,2)], [lkn(body_start+max_twist,3), lhp(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右小指
+    plot([rst(body_start+max_twist,2), rank(body_start+max_twist,2)], [rst(body_start+max_twist,3), rank(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右親指
+    plot([rbt(body_start+max_twist,2), rank(body_start+max_twist,2)], [rbt(body_start+max_twist,3), rank(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右踵
+    plot([rh(body_start+max_twist,2), rank(body_start+max_twist,2)], [rh(body_start+max_twist,3), rank(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右下腿
+    plot([rank(body_start+max_twist,2), rkn(body_start+max_twist,2)], [rank(body_start+max_twist,3), rkn(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右大腿
+    plot([rkn(body_start+max_twist,2), rhp(body_start+max_twist,2)], [rkn(body_start+max_twist,3), rhp(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %両大腿
+    plot([lhp(body_start+max_twist,2), rhp(body_start+max_twist,2)], [lhp(body_start+max_twist,3), rhp(body_start+max_twist,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左体幹
+    plot([lshol(body_start+max_twist,2), lhp(body_start+max_twist,2)], [lshol(body_start+max_twist,3), lhp(body_start+max_twist,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %両肩
+    plot([lshol(body_start+max_twist,2), rshol(body_start+max_twist,2)], [lshol(body_start+max_twist,3), rshol(body_start+max_twist,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右体幹
+    plot([rshol(body_start+max_twist,2), rhp(body_start+max_twist,2)], [rshol(body_start+max_twist,3), rhp(body_start+max_twist,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+
+    if batterside=='Left'
+    %左上腕
+    plot([lshol(body_start+max_twist,2), lelb(body_start+max_twist,2)], [lshol(body_start+max_twist,3), lelb(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左前腕
+    plot([lelb(body_start+max_twist,2), lwst(body_start+max_twist,2)], [lelb(body_start+max_twist,3), lwst(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右上腕
+    plot([rshol(body_start+max_twist,2), relb(body_start+max_twist,2)], [rshol(body_start+max_twist,3), relb(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右前腕
+    plot([relb(body_start+max_twist,2), rwst(body_start+max_twist,2)], [relb(body_start+max_twist,3), rwst(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    else
+    %右上腕
+    plot([rshol(body_start+max_twist,2), relb(body_start+max_twist,2)], [rshol(body_start+max_twist,3), relb(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右前腕
+    plot([relb(body_start+max_twist,2), rwst(body_start+max_twist,2)], [relb(body_start+max_twist,3), rwst(body_start+max_twist,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on 
+    %左上腕
+    plot([lshol(body_start+max_twist,2), lelb(body_start+max_twist,2)], [lshol(body_start+max_twist,3), lelb(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左前腕
+    plot([lelb(body_start+max_twist,2), lwst(body_start+max_twist,2)], [lelb(body_start+max_twist,3), lwst(body_start+max_twist,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    end
+    %左耳
+    plot([neck(body_start+max_twist,2), lear(body_start+max_twist,2)], [neck(body_start+max_twist,3), lear(body_start+max_twist,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右耳
+    plot([neck(body_start+max_twist,2), rear(body_start+max_twist,2)], [neck(body_start+max_twist,3), rear(body_start+max_twist,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    % %重心
+    % plot(GM(max_twist,2), GM(max_twist,3), 'o',...
+    %       'MarkerSize', 5,'MarkerFaceColor',[0.5,0.5,0.5] ,'MarkerEdgeColor','b');
+    % hold on
+    %バット
+    plot([bathead(start_diff+max_twist,2), batgrip(start_diff+max_twist,2)], [bathead(start_diff+max_twist,3), batgrip(start_diff+max_twist,3)], ...
+          "color",[0 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %ヘッド軌道
+    plot(bathead(start_diff+foot_on:imp,2),bathead(start_diff+foot_on:imp,3),'m');
+    hold on
+    plot(xyz,yyz,'--c');
+    hold on
+    xlim([-1 1]);
+    ylim([0 2]);
+    title({'Ball Speed (km/h)' s3});
+    if batterside=='Left'
+        set(gca, 'XDir', 'reverse');
+    end
+
+
+    subplot(3,4,3)
+    
+    %左小指
+    plot([lst(body_start+pararell,2), lank(body_start+pararell,2)], [lst(body_start+pararell,3), lank(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左親指
+    plot([lbt(body_start+pararell,2), lank(body_start+pararell,2)], [lbt(body_start+pararell,3), lank(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左踵
+    plot([lh(body_start+pararell,2), lank(body_start+pararell,2)], [lh(body_start+pararell,3), lank(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左下腿
+    plot([lank(body_start+pararell,2), lkn(body_start+pararell,2)], [lank(body_start+pararell,3), lkn(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左大腿
+    plot([lkn(body_start+pararell,2), lhp(body_start+pararell,2)], [lkn(body_start+pararell,3), lhp(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右小指
+    plot([rst(body_start+pararell,2), rank(body_start+pararell,2)], [rst(body_start+pararell,3), rank(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右親指
+    plot([rbt(body_start+pararell,2), rank(body_start+pararell,2)], [rbt(body_start+pararell,3), rank(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右踵
+    plot([rh(body_start+pararell,2), rank(body_start+pararell,2)], [rh(body_start+pararell,3), rank(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右下腿
+    plot([rank(body_start+pararell,2), rkn(body_start+pararell,2)], [rank(body_start+pararell,3), rkn(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右大腿
+    plot([rkn(body_start+pararell,2), rhp(body_start+pararell,2)], [rkn(body_start+pararell,3), rhp(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %両大腿
+    plot([lhp(body_start+pararell,2), rhp(body_start+pararell,2)], [lhp(body_start+pararell,3), rhp(body_start+pararell,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左体幹
+    plot([lshol(body_start+pararell,2), lhp(body_start+pararell,2)], [lshol(body_start+pararell,3), lhp(body_start+pararell,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %両肩
+    plot([lshol(body_start+pararell,2), rshol(body_start+pararell,2)], [lshol(body_start+pararell,3), rshol(body_start+pararell,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右体幹
+    plot([rshol(body_start+pararell,2), rhp(body_start+pararell,2)], [rshol(body_start+pararell,3), rhp(body_start+pararell,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    if batterside=='Left'
+    %左上腕
+    plot([lshol(body_start+pararell,2), lelb(body_start+pararell,2)], [lshol(body_start+pararell,3), lelb(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左前腕
+    plot([lelb(body_start+pararell,2), lwst(body_start+pararell,2)], [lelb(body_start+pararell,3), lwst(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右上腕
+    plot([rshol(body_start+pararell,2), relb(body_start+pararell,2)], [rshol(body_start+pararell,3), relb(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右前腕
+    plot([relb(body_start+pararell,2), rwst(body_start+pararell,2)], [relb(body_start+pararell,3), rwst(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    else
+    %右上腕
+    plot([rshol(body_start+pararell,2), relb(body_start+pararell,2)], [rshol(body_start+pararell,3), relb(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右前腕
+    plot([relb(body_start+pararell,2), rwst(body_start+pararell,2)], [relb(body_start+pararell,3), rwst(body_start+pararell,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    plot([lshol(body_start+pararell,2), lelb(body_start+pararell,2)], [lshol(body_start+pararell,3), lelb(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左前腕
+    plot([lelb(body_start+pararell,2), lwst(body_start+pararell,2)], [lelb(body_start+pararell,3), lwst(body_start+pararell,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    end
+    %左耳
+    plot([neck(body_start+pararell,2), lear(body_start+pararell,2)], [neck(body_start+pararell,3), lear(body_start+pararell,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右耳
+    plot([neck(body_start+pararell,2), rear(body_start+pararell,2)], [neck(body_start+pararell,3), rear(body_start+pararell,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    % %重心
+    % plot(GM(pararell,2), GM(pararell,3), 'o',...
+    %       'MarkerSize', 5,'MarkerFaceColor',[0.5,0.5,0.5] ,'MarkerEdgeColor','b');
+    % hold on
+    %バット
+    plot([bathead(start_diff+pararell,2), batgrip(start_diff+pararell,2)], [bathead(start_diff+pararell,3), batgrip(start_diff+pararell,3)], ...
+          "color",[0 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %ヘッド軌道
+    plot(bathead(start_diff+foot_on:imp,2),bathead(start_diff+foot_on:imp,3),'m');
+    hold on
+    plot(xyz,yyz,'--c');
+    hold on
+    xlim([-1 1]);
+    ylim([0 2]);
+    if batterside=='Left'
+        set(gca, 'XDir', 'reverse');
+    end
+
+    subplot(3,4,4)
+    
+    %左小指
+    plot([lst(frame,2), lank(frame,2)], [lst(frame,3), lank(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左親指
+    plot([lbt(frame,2), lank(frame,2)], [lbt(frame,3), lank(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左踵
+    plot([lh(frame,2), lank(frame,2)], [lh(frame,3), lank(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左下腿
+    plot([lank(frame,2), lkn(frame,2)], [lank(frame,3), lkn(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左大腿
+    plot([lkn(frame,2), lhp(frame,2)], [lkn(frame,3), lhp(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右小指
+    plot([rst(frame,2), rank(frame,2)], [rst(frame,3), rank(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右親指
+    plot([rbt(frame,2), rank(frame,2)], [rbt(frame,3), rank(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右踵
+    plot([rh(frame,2), rank(frame,2)], [rh(frame,3), rank(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右下腿
+    plot([rank(frame,2), rkn(frame,2)], [rank(frame,3), rkn(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右大腿
+    plot([rkn(frame,2), rhp(frame,2)], [rkn(frame,3), rhp(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %両大腿
+    plot([lhp(frame,2), rhp(frame,2)], [lhp(frame,3), rhp(frame,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左体幹
+    plot([lshol(frame,2), lhp(frame,2)], [lshol(frame,3), lhp(frame,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %両肩
+    plot([lshol(frame,2), rshol(frame,2)], [lshol(frame,3), rshol(frame,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右体幹
+    plot([rshol(frame,2), rhp(frame,2)], [rshol(frame,3), rhp(frame,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    if batterside=='Left'
+    %左上腕
+    plot([lshol(frame,2), lelb(frame,2)], [lshol(frame,3), lelb(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左前腕
+    plot([lelb(frame,2), lwst(frame,2)], [lelb(frame,3), lwst(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右上腕
+    plot([rshol(frame,2), relb(frame,2)], [rshol(frame,3), relb(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右前腕
+    plot([relb(frame,2), rwst(frame,2)], [relb(frame,3), rwst(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    text(0.8,1.9,texts6,'FontSize',6);
+    hold on
+    text(0.8,1.7,texts3,'FontSize',6);
+    hold on
+    else
+    %右上腕
+    plot([rshol(frame,2), relb(frame,2)], [rshol(frame,3), relb(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右前腕
+    plot([relb(frame,2), rwst(frame,2)], [relb(frame,3), rwst(frame,3)], ...
+          "color",[0 0 1], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    plot([lshol(frame,2), lelb(frame,2)], [lshol(frame,3), lelb(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %左前腕
+    plot([lelb(frame,2), lwst(frame,2)], [lelb(frame,3), lwst(frame,3)], ...
+          "color",[1 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    text(-0.8,1.9,texts6,'FontSize',6);
+    hold on
+    text(-0.8,1.7,texts3,'FontSize',6);
+    hold on
+    end
+    %左耳
+    plot([neck(frame,2), lear(frame,2)], [neck(frame,3), lear(frame,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    %右耳
+    plot([neck(frame,2), rear(frame,2)], [neck(frame,3), rear(frame,3)], ...
+          "color",[0 1 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    % %重心
+    % plot(GM(200,2), GM(200,3), 'o',...
+    %       'MarkerSize', 5,'MarkerFaceColor',[0.5,0.5,0.5] ,'MarkerEdgeColor','b');
+    % hold on
+    %バット
+    plot([bathead(imp,2), batgrip(imp,2)], [bathead(imp,3), batgrip(imp,3)], ...
+          "color",[0 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    for fi1=1:49
+    plot([bathead(fi1+ti,2), batgrip(fi1+ti,2)], [bathead(fi1+ti,3), batgrip(fi1+ti,3)],...
+          "color",[0.5 0.5 0.5], 'LineWidth', 0.5, 'MarkerSize', 10);
+    end
+    hold on
+    %ヘッド軌道
+    plot(bathead(start_diff+foot_on:imp,2),bathead(start_diff+foot_on:imp,3),'m');
+    hold on
+    plot(xyz,yyz,'--c');
+    hold on
+    xlim([-1 1]);
+    ylim([0 2]);
+    title({'Swing Angle (°)' s2});
+    if batterside=='Left'
+        set(gca, 'XDir', 'reverse');
+    end
+    
+    
+    subplot(3,4,7)
+    plot(HB_62(:,1),HB_62(:,2),"Color",[0.7 0.7 0.7],"LineWidth",2.0);
+    hold on
+    plot(L_box(:,1),L_box(:,2),"Color",[0.7 0.7 0.7],"LineWidth",2.0);
+    hold on
+    plot(R_box(:,1),R_box(:,2),"Color",[0.7 0.7 0.7],"LineWidth",2.0);
+    hold on
+    plot(yxy,xxy,'--c');
+    hold on
+    %右足首
+    plot(rank(frame,1),rank(frame,2),'o','MarkerSize',5,'MarkerEdgeColor','b','MarkerFaceColor','b');
+    hold on
+    %左足首
+    plot(lank(frame,1),lank(frame,2),'o','MarkerSize',5,'MarkerEdgeColor','r','MarkerFaceColor','r');
+    hold on
+
+    plot(contact(1),contact(2),'or','MarkerSize',5);
+    hold on
+    plot(point05(1),point05(2),'om','MarkerSize',5);
+    hold on
+    plot([bathead(imp,1), batgrip(imp,1)], [bathead(imp,2), batgrip(imp,2)],...
+          "color",[0 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    for fi2=1:49
+    plot([bathead(fi2+ti,1), batgrip(fi2+ti,1)], [bathead(fi2+ti,2), batgrip(fi2+ti,2)],...
+          "color",[0.5 0.5 0.5], 'LineWidth', 0.5, 'MarkerSize', 10);
+    end
+    hold on
+    text(-0.9,-0.4,texts4,'FontSize',6);
+    hold on
+    xlim([-1 1]);
+    ylim([-0.5 1.5]);
+    title('インパクト位置(頭上)');
+
+    subplot(3,4,8)
+    plot(HB_46(:,1),HB_46(:,2),"Color",[0.7 0.7 0.7],"LineWidth",2.0);
+    hold on
+    plot(L_box2(:,1),L_box2(:,2),"Color",[0.7 0.7 0.7],"LineWidth",2.0);
+    hold on
+    plot(R_box2(:,1),R_box2(:,2),"Color",[0.7 0.7 0.7],"LineWidth",2.0);
+    hold on
+    plot(yxy2,yyz,'--c');
+    hold on
+    plot(contact(1),contact(3),'or','MarkerSize',5);
+    hold on
+    plot(point05(1),point05(3),'om','MarkerSize',5);
+    hold on
+    plot([bathead(imp,1), batgrip(imp,1)], [bathead(imp,3), batgrip(imp,3)], ...
+          "color",[0 0 0], 'LineWidth', 2, 'MarkerSize', 10);
+    hold on
+    plot(zone(:,1),zone(:,2),'k:');
+    hold on
+    text(-0.8,1.8,texts5,'FontSize',6);
+    hold on
+    xlim([-1 1]);
+    ylim([-0.1 2.0]);
+    title('インパクト位置(捕手目線)');
+
+    subplot(3,4,[11 12])
+    plot(bat_graph(:,1),bat_graph(:,2),"Color",[0.8 0.2 0],"LineWidth",2.0);
+    hold on
+    
+    plot(deviation(2),deviation(1),'or','MarkerSize',5);
+    hold on
+    plot(0,0,'o','MarkerSize',5,'MarkerFaceColor','k','MarkerEdgeColor','k');
+    hold on
+    xline(0,'k:');
+    hold on
+    yline(0,'k:');
+    hold on
+    text(-0.125,0.05,texts7,'FontSize',6);
+    hold on
+    text(0,0.05,texts8,'FontSize',6);
+    hold on
+    xlim([-0.1524 0.20]);
+    ylim([-0.06 0.06]);
+    title('バット上のインパクト位置');
+
+    saveas(fig,wdw_name2,'jpeg');
+    close(fig);
+    end
+     
+end 
+
+toc
